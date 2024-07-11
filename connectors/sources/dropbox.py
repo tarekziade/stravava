@@ -203,6 +203,9 @@ class DropboxClient:
             "client_secret": self.app_secret,
         }
 
+        self._logger.debug(
+            f"Generating an access token with url: {url}, headers: {headers}"
+        )
         async with aiohttp.ClientSession() as session:
             async with session.post(url=url, headers=headers, data=data) as response:
                 response_data = await response.json()
@@ -315,6 +318,9 @@ class DropboxClient:
                 await self._set_access_token()
                 headers = self._get_request_headers(
                     file_type=file_type, url_name=url_name, kwargs=kwargs
+                )
+                self._logger.debug(
+                    f"Making a POST call for url: {url} with a payload: {data}"
                 )
                 async with self._get_session.post(
                     url=url, headers=headers, data=data
@@ -801,7 +807,7 @@ class DropboxDataSource(BaseDataSource):
             self._logger.warning("DLS is not enabled. Skipping")
             return
 
-        self._logger.info("Fetching members")
+        self._logger.info("Fetching users for Access Control sync")
         async for users in self.dropbox_client.list_members():
             for user in users.get("members", []):
                 yield await self._user_access_control_doc(user=user)
@@ -880,10 +886,11 @@ class DropboxDataSource(BaseDataSource):
         download_func = self.download_func(is_shared, attachment, filename, folder_id)
         if not download_func:
             self._logger.warning(
-                f"Skipping the file: {filename} since it is not in the downloadable format."
+                f"Skipping file '{filename}' since it is not downloadable."
             )
             return
 
+        self._logger.debug(f"Downloading content for file: {filename}")
         document = {
             "_id": attachment["id"],
             "_timestamp": attachment["server_modified"],
@@ -944,6 +951,7 @@ class DropboxDataSource(BaseDataSource):
         }
 
     async def _fetch_files_folders(self, path, folder_id=None):
+        self._logger.info(f"Fetching files and folders from path: '{path}'")
         async for response in self.dropbox_client.get_files_folders(
             path=path, folder_id=folder_id
         ):
@@ -951,6 +959,7 @@ class DropboxDataSource(BaseDataSource):
                 yield self._adapt_dropbox_doc_to_es_doc(response=entry), entry
 
     async def _fetch_shared_files(self):
+        self._logger.info("Fetching shared files")
         async for response in self.dropbox_client.get_shared_files():
             for entry in response.get("entries"):
                 async for metadata in self.dropbox_client.get_received_file_metadata(
@@ -962,6 +971,7 @@ class DropboxDataSource(BaseDataSource):
                     ), json_metadata
 
     async def advanced_sync(self, rule):
+        self._logger.debug(f"Fetching files/folders for sync rule: {rule}")
         async for response in self.dropbox_client.search_files_folders(rule=rule):
             for entry in response.get("matches"):
                 data = entry.get("metadata", {}).get("metadata")
@@ -1010,6 +1020,7 @@ class DropboxDataSource(BaseDataSource):
         return permissions
 
     async def get_folder_permission(self, shared_folder_id, account_id):
+        self._logger.debug(f"Fetching permissions for folder: {shared_folder_id}")
         if not shared_folder_id:
             return [account_id]
 
@@ -1021,6 +1032,7 @@ class DropboxDataSource(BaseDataSource):
             )
 
     async def get_file_permission_without_batching(self, file_id, account_id):
+        self._logger.debug(f"Fetching permissions for file: {file_id}")
         async for permission in self.dropbox_client.list_file_permission_without_batching(
             file_id=file_id
         ):
@@ -1029,6 +1041,7 @@ class DropboxDataSource(BaseDataSource):
             )
 
     async def get_account_details(self):
+        self._logger.debug("Fetching account details")
         response = await anext(
             self.dropbox_client.api_call(
                 base_url=BASE_URLS["FILES_FOLDERS_BASE_URL"],
@@ -1042,6 +1055,7 @@ class DropboxDataSource(BaseDataSource):
         return account_id, member_id
 
     async def get_permission_list(self, item_type, item, account_id):
+        self._logger.debug(f"Fetching permissions for {item_type}")
         if item_type == FOLDER:
             shared_folder_id = item.get("shared_folder_id") or item.get(
                 "parent_shared_folder_id"
@@ -1049,6 +1063,7 @@ class DropboxDataSource(BaseDataSource):
             return await self.get_folder_permission(
                 shared_folder_id=shared_folder_id, account_id=account_id
             )
+
         return await self.get_file_permission_without_batching(
             file_id=item.get("id"), account_id=account_id
         )
@@ -1144,9 +1159,11 @@ class DropboxDataSource(BaseDataSource):
             batched_document = {}
 
     async def fetch_file_folders_with_dls(self):
+        self._logger.info("Fetching permissions for files and folders")
         account_id, member_id = await self.get_account_details()
         self.dropbox_client.member_id = member_id
         async for folder_id in self.get_team_folder_id():
+            self._logger.info(f"Iterating through folder with id '{folder_id}'")
             async for mapped_document in self.add_document_to_list(
                 func=self._fetch_files_folders,
                 account_id=account_id,
@@ -1177,9 +1194,10 @@ class DropboxDataSource(BaseDataSource):
 
         elif filtering and filtering.has_advanced_rules():
             advanced_rules = filtering.get_advanced_rules()
+            self._logger.debug(
+                f"Fetching documents using configured advanced sync rules: {advanced_rules}"
+            )
             for rule in advanced_rules:
-                self._logger.debug(f"Fetching files using advanced sync rule: {rule}")
-
                 async for document, attachment in self.advanced_sync(rule=rule):
                     yield self.document_tuple(document=document, attachment=attachment)
         else:
