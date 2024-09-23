@@ -34,6 +34,22 @@ class TemporaryConnectorApiWrapper(ESClient):
             headers={"accept": "application/json"},
         )
 
+    async def connector_update_error(self, connector_id, error):
+        await self.client.perform_request(
+            "PUT",
+            f"/_connector/{connector_id}/_error",
+            headers={"accept": "application/json", "Content-Type": "application/json"},
+            body={"error": error},
+        )
+
+    async def connector_update_last_sync_info(self, connector_id, last_sync_info):
+        await self.client.perform_request(
+            "PUT",
+            f"/_connector/{connector_id}/_last_sync",
+            headers={"accept": "application/json", "Content-Type": "application/json"},
+            body=last_sync_info,
+        )
+
     async def connector_update_filtering_draft_validation(
         self, connector_id, validation_result
     ):
@@ -96,6 +112,20 @@ class ESApi(ESClient):
     async def connector_check_in(self, connector_id):
         return await self._retrier.execute_with_retry(
             partial(self._api_wrapper.connector_check_in, connector_id)
+        )
+
+    async def connector_update_error(self, connector_id, error):
+        await self._retrier.execute_with_retry(
+            partial(self._api_wrapper.connector_update_error, connector_id, error)
+        )
+
+    async def connector_update_last_sync_info(self, connector_id, last_sync_info):
+        await self._retrier.execute_with_retry(
+            partial(
+                self._api_wrapper.connector_update_last_sync_info,
+                connector_id,
+                last_sync_info,
+            )
         )
 
     async def connector_update_filtering_draft_validation(

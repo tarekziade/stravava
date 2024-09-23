@@ -708,12 +708,17 @@ class Connector(ESDocument):
         return next_run(scheduling_property.get("interval"), now)
 
     async def _update_datetime(self, field, new_ts):
-        await self.index.update(
-            doc_id=self.id,
-            doc={field: iso_utc(new_ts)},
-            if_seq_no=self._seq_no,
-            if_primary_term=self._primary_term,
-        )
+        if self.index.feature_use_connectors_api:
+            await self.index.api.connector_update_last_sync_info(
+                connector_id=self.id, last_sync_info={field: iso_utc(new_ts)}
+            )
+        else:
+            await self.index.update(
+                doc_id=self.id,
+                doc={field: iso_utc(new_ts)},
+                if_seq_no=self._seq_no,
+                if_primary_term=self._primary_term,
+            )
 
     async def update_last_sync_scheduled_at_by_job_type(self, job_type, new_ts):
         match job_type:
@@ -746,24 +751,37 @@ class Connector(ESDocument):
             msg = f"Unknown job type: {job_type}"
             raise ValueError(msg)
 
-        doc = {
-            "status": Status.CONNECTED.value,
-            "error": None,
-        } | last_sync_information
+        if self.index.feature_use_connectors_api:
+            await self.index.api.connector_update_error(
+                connector_id=self.id, error=None
+            )
+            await self.index.api.connector_update_last_sync_info(
+                connector_id=self.id, last_sync_info=last_sync_information
+            )
+        else:
+            doc = {
+                "status": Status.CONNECTED.value,
+                "error": None,
+            } | last_sync_information
 
-        await self.index.update(
-            doc_id=self.id,
-            doc=doc,
-            if_seq_no=self._seq_no,
-            if_primary_term=self._primary_term,
-        )
+            await self.index.update(
+                doc_id=self.id,
+                doc=doc,
+                if_seq_no=self._seq_no,
+                if_primary_term=self._primary_term,
+            )
 
     async def error(self, error):
-        doc = {
-            "status": Status.ERROR.value,
-            "error": str(error),
-        }
-        await self.index.update(doc_id=self.id, doc=doc)
+        if self.index.feature_use_connectors_api:
+            await self.index.api.connector_update_error(
+                connector_id=self.id, error=error
+            )
+        else:
+            doc = {
+                "status": Status.ERROR.value,
+                "error": str(error),
+            }
+            await self.index.update(doc_id=self.id, doc=doc)
 
     async def sync_done(self, job, cursor=None):
         job_status = JobStatus.ERROR if job is None else job.status
@@ -802,8 +820,6 @@ class Connector(ESDocument):
 
         doc = {
             "last_synced": iso_utc(),
-            "status": connector_status.value,
-            "error": job_error,
         } | last_sync_information
 
         # only update sync cursor after a successful content sync job
@@ -814,7 +830,16 @@ class Connector(ESDocument):
             doc["last_indexed_document_count"] = job.indexed_document_count
             doc["last_deleted_document_count"] = job.deleted_document_count
 
-        await self.index.update(doc_id=self.id, doc=doc)
+        if self.index.feature_use_connectors_api:
+            await self.index.api.connector_update_error(
+                connector_id=self.id, error=job_error
+            )
+            await self.index.api.connector_update_last_sync_info(
+                connector_id=self.id, last_sync_info=last_sync_information
+            )
+        else:
+            doc = doc | {"status": connector_status.value, "error": job_error}
+            await self.index.update(doc_id=self.id, doc=doc)
 
     @with_concurrency_control()
     async def prepare(self, config, sources):
