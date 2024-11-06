@@ -156,6 +156,34 @@
 ##    This will be logged on 'DEBUG' log level. Note: this depends on the service.log_level, not elasticsearch.log_level
 #elasticsearch.bulk.enable_operations_logging: false
 #
+## ------------------------------- Elasticsearch: Bulk - Error Monitor ----------------------------------
+#
+##  Configurations related to Error Monitor functionality of the syncs when documents are ingested into Elasticsearch.
+##  Errors can happen during ingestion of content into Elasticsearch - for example a document could violate the index mapping.
+##  If this error happens rarely, we're safe to ignore such documents.
+##  Error monitor in this section is taking care of this by ignoring transient errors while ingesting documents into Elasticsearch.
+##  If any of the thresholds defined in this section are exceeded, then the whole sync is failed.
+#
+##  Switch for enabling/disabling error monitor
+##  When disabled, errors are only counted - they never cause failures (legacy behavior)
+#elasticsearch.bulk.error_monitor.enabled: true
+#
+##  Total number of errors that will be tolerated per sync.
+##  Once number of errors exceed this number, the sync will terminate.
+#elasticsearch.bulk.error_monitor.max_total_errors: 1000
+#
+##  Maximum number of consecutive errors that will be tolerated per sync.
+##  Once number of consecutive errors exceed this number, the sync will terminate.
+#elasticsearch.bulk.error_monitor.max_consecutive_errors: 10
+#
+##  Maximum error rate within the window size that will be tolerated per sync.
+##  Once error rate exceeds this number, the sync will terminate.
+##  Once number of errors exceed this number, the sync will terminate.
+#elasticsearch.bulk.error_monitor.max_error_rate: 0.15
+#
+##  Number of last operations used for tracking the error rate.
+#elasticsearch.bulk.error_monitor.error_window_size: 100
+#
 ## ------------------------------- Elasticsearch: Experimental ------------------------
 #
 ##  Experimental configuration options for Elasticsearch interactions.
@@ -207,10 +235,6 @@
 #
 ##  The interval (in seconds) to run job cleanup task.
 #service.job_cleanup_interval: 300
-#
-#
-##  Connector service log level.
-#service.log_level: INFO
 #
 #
 ## ------------------------------- Extraction Service ----------------------------------

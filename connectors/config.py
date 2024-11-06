@@ -78,6 +78,14 @@ def _default_config():
                 "retry_interval": DEFAULT_ELASTICSEARCH_RETRY_INTERVAL,
                 "concurrent_downloads": 10,
                 "enable_operations_logging": False,
+                "error_monitor": {
+                    "enabled": True,
+                    "max_total_errors": 1000,
+                    "max_consecutive_errors": 10,
+                    "max_error_rate": 0.15,
+                    "error_window_size": 100,
+                    "error_queue_size": 10,
+                },
             },
             "max_retries": DEFAULT_ELASTICSEARCH_MAX_RETRIES,
             "retry_interval": DEFAULT_ELASTICSEARCH_RETRY_INTERVAL,
@@ -101,6 +109,16 @@ def _default_config():
             "max_file_download_size": DEFAULT_MAX_FILE_SIZE,
             "job_cleanup_interval": 300,
             "log_level": "INFO",
+            "extraction": {
+                "error_monitor": {
+                    "enabled": True,
+                    "max_total_errors": 1000,
+                    "max_consecutive_errors": 10,
+                    "max_error_rate": 0.15,
+                    "error_window_size": 100,
+                    "error_queue_size": 10,
+                },
+            },
         },
         "sources": {
             "azure_blob_storage": "connectors.sources.azure_blob_storage:AzureBlobStorageDataSource",

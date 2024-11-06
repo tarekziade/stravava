@@ -26,10 +26,12 @@ from pympler import asizeof
 from connectors import utils
 from connectors.utils import (
     ConcurrentTasks,
+    ErrorMonitor,
     InvalidIndexNameError,
     MemQueue,
     NonBlockingBoundedSemaphore,
     RetryStrategy,
+    TooManyErrors,
     UnknownRetryStrategyError,
     base64url_to_base64,
     convert_to_b64,
@@ -1296,3 +1298,153 @@ def test_nested_get_from_dict(dictionary, default, expected):
 )
 def test_parse_datetime_string_compatibility(string, parsed_datetime):
     assert parse_datetime_string(string) == parsed_datetime
+
+
+def test_error_monitor_raises_after_too_many_errors_in_window():
+    error_monitor = ErrorMonitor(max_error_rate=0.15, error_window_size=100)
+
+    for _ in range(10):
+        error_monitor.track_error(Exception("Something went wrong"))
+
+    for _ in range(84):
+        error_monitor.track_success()
+
+    for _ in range(5):
+        error_monitor.track_error(Exception("Something went wrong"))
+
+    with pytest.raises(TooManyErrors):
+        error_monitor.track_error(InvalidIndexNameError("Can't use this name"))
+
+
+def test_error_monitor_raises_when_errors_were_reported_before():
+    # Regression test.
+    # Problem fixed was that monitor incorrectly calculates max_error_ratio - it never
+    # actually considered either ratio or window size - it was always raising an error if
+    # window_size * max_error_ratio errors happened, which is 15 in case of this setup.
+    # What it should do is really consider the window and error ratio, e.g:
+    # 85 documents were correctly ingested, 15 failed. Window will be: 85 x success, 15 x failure,
+    # error_ratio = 0.15, but condition to raise is max_error_ratio < error_ratio - it's false, so
+    # no error is raised.
+    #
+    # Then 90 documents were ingested correctly, window moves and will be: 10 x failure, 90 x success,
+    # error_ratio = 0.1; Then 10 errors happen, but error_ratio will stay the same because window will be
+    # 90 x success, 10 x failure.
+
+    error_monitor = ErrorMonitor(
+        max_error_rate=0.15, error_window_size=100, max_consecutive_errors=100
+    )
+
+    # First set things up
+    for _ in range(2):
+        for _ in range(5):
+            error_monitor.track_error(Exception("Something went wrong"))
+
+        for _ in range(40):
+            error_monitor.track_success()
+
+    # Then do actual test
+    # Before:
+    # 5 x failure; 40 x success; 5 x failure; 40 x success, real error_ratio = 0.1
+    # After:
+    # 40 x success; 5 x failure; 40 x success; 5 x failure, real error_ratio = 0.1
+    for _ in range(5):
+        error_monitor.track_error(Exception("Something went wrong"))
+
+    # Before:
+    # 40 x success; 5 x failure; 40 x success; 5 x failure, real error_ratio = 0.1
+    # After:
+    # 1 x success; 5x failure; 94 x success, real_error_ratio = 0.05
+    for _ in range(94):
+        error_monitor.track_success()
+
+    # Before:
+    # 1 x success; 5 x failure; 94 x success, real_error_ratio = 0.05
+    # After:
+    # 85 x success, 15 x failure, real_error_ratio = 0.15.
+    # Any error within next 85 documents should trigger the MaxErrorsInWindowExceededError
+    for _ in range(15):
+        error_monitor.track_error(Exception("Something went wrong again"))
+
+    with pytest.raises(TooManyErrors):
+        error_monitor.track_error(InvalidIndexNameError("Can't use this name"))
+
+
+def test_error_monitor_when_reports_too_many_consecutive_errors():
+    error_monitor = ErrorMonitor(max_consecutive_errors=3)
+
+    error_monitor.track_error(Exception("first"))
+    error_monitor.track_error(Exception("second"))
+    error_monitor.track_error(Exception("third"))
+
+    with pytest.raises(TooManyErrors):
+        error_monitor.track_error(Exception("fourth"))
+
+
+def test_error_monitor_when_reports_too_many_total_errors():
+    error_monitor = ErrorMonitor(
+        max_total_errors=100, max_consecutive_errors=999, max_error_rate=1
+    )
+
+    for _ in range(10):
+        error_monitor.track_error(Exception("first"))
+
+    for _ in range(500):
+        error_monitor.track_success()
+
+    for _ in range(90):
+        error_monitor.track_error(Exception("second"))
+
+    with pytest.raises(TooManyErrors):
+        error_monitor.track_error(Exception("third"))
+
+
+def test_error_monitor_when_reports_too_many_errors_in_window():
+    error_monitor = ErrorMonitor(error_window_size=100, max_error_rate=0.05)
+
+    # rate is 0.04
+    for _ in range(4):
+        error_monitor.track_error(Exception("first"))
+
+    for _ in range(95):
+        error_monitor.track_success()
+
+    # rate gets to 0.05 but does not raise yet
+    for _ in range(1):
+        error_monitor.track_error(Exception("second"))
+
+    # rate stays 0.05 here
+    for _ in range(4):
+        error_monitor.track_error(Exception("third"))
+
+    with pytest.raises(TooManyErrors):
+        error_monitor.track_error(Exception("last"))
+
+
+def test_error_monitor_when_errors_are_tracked_last_x_errors_are_stored():
+    error_monitor = ErrorMonitor(error_queue_size=5)
+
+    for _ in range(5):
+        error_monitor.track_error(Exception("first_part"))
+
+    for _ in range(999):
+        error_monitor.track_success()
+
+    for _ in range(3):
+        error_monitor.track_error(Exception("second_part"))
+
+    errors = error_monitor.error_queue
+
+    assert str(errors[0]) == "first_part"
+    assert str(errors[1]) == "first_part"
+    assert str(errors[2]) == "second_part"
+    assert str(errors[3]) == "second_part"
+    assert str(errors[4]) == "second_part"
+
+
+def test_error_monitor_when_disabled():
+    error_monitor = ErrorMonitor(
+        enabled=False, max_total_errors=1, max_consecutive_errors=1, max_error_rate=0.01
+    )
+
+    for _ in range(9999):
+        error_monitor.track_error(Exception("second_part"))

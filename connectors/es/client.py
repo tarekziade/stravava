@@ -236,7 +236,6 @@ class TransientElasticsearchRetrier:
             retry += 1
             try:
                 result = await func()
-
                 return result
             except ConnectionTimeout:
                 self._logger.warning(
