@@ -112,6 +112,17 @@ VIEW_ROLE_TYPES = [
 SPO_MAX_EXPAND_SIZE = 20
 
 
+class UnexpectedClientError(Exception):
+    """Internal exception class for non-ok and non-error responses from API.
+    In some cases we receive non-okay responses from API that do not raise errors automatically.
+
+    These cases do not seem to be handleable, so we wrap them in this special error class. Mostly they seem
+    to happen when calling legacy REST sharepoint endpoints.
+    """
+
+    pass
+
+
 class NotFound(Exception):
     """Internal exception class to handle 404s from the API that has a meaning, that collection
     for specific object is empty.
@@ -455,7 +466,13 @@ class MicrosoftAPISession:
                 absolute_url,
                 headers=headers,
             ) as resp:
-                yield resp
+                if resp.ok:
+                    yield resp
+                else:
+                    msg = f"Received non-ok status: {resp.status}. Response body: {await resp.read()}"
+                    raise UnexpectedClientError(
+                        msg
+                    )
         except aiohttp.client_exceptions.ClientOSError:
             self._logger.warning(
                 "Graph API dropped the connection. It might indicate, that connector makes too many requests - decrease concurrency settings, otherwise Graph API can block this app."
@@ -884,7 +901,7 @@ class SharepointOnlineClient:
             return response.get("value", False)
         except NotFound:
             return False
-        except BadRequestError:
+        except (BadRequestError, UnexpectedClientError):
             self._logger.warning(
                 f"Received error response when retrieving `{list_item_id}` from list: `{site_list_name}` in site: `{site_web_url}`"
             )
@@ -926,8 +943,9 @@ class SharepointOnlineClient:
 
             for attachment in list_item["AttachmentFiles"]:
                 yield attachment
-        except NotFound:
+        except (NotFound, BadRequestError, UnexpectedClientError):
             # We can safely ignore cause Sharepoint can return 404 in case List Item is of specific types that do not support/have attachments
+            # 400 is sometimes returned for weird cases when Sharepoint Server responds with incorrect Content-Length header
             # Yes, makes no sense to me either.
             return
 

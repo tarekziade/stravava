@@ -568,6 +568,26 @@ class TestMicrosoftAPISession:
             await microsoft_api_session.post(url, payload)
 
     @pytest.mark.asyncio
+    async def test_fetch_with_client_payload_error(
+        self, microsoft_api_session, patch_sleep
+    ):
+        url = "http://localhost:1234/url"
+        response_mock = AsyncMock()
+        response_mock.status = 400
+        response_mock.ok = False
+        response_mock.read = AsyncMock(return_value="Failed to read body")
+        response_mock.json = AsyncMock(
+            # return_value = {}
+            side_effect=[aiohttp.client_exceptions.ClientPayloadError("something")]
+        )
+
+        async_response = AsyncMock()
+        async_response.__aenter__ = AsyncMock(return_value=response_mock)
+
+        with patch("aiohttp.client.ClientSession.get", return_value=async_response):
+            await microsoft_api_session.fetch(url)
+
+    @pytest.mark.asyncio
     async def test_fetch_with_retry(
         self, microsoft_api_session, mock_responses, patch_sleep
     ):
