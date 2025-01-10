@@ -702,7 +702,7 @@ class GitHubClient:
     async def _put_to_sleep(self, resource_type):
         retry_after = await self._get_retry_after(resource_type=resource_type)
         self._logger.debug(
-            f"Connector will attempt to retry after {retry_after} seconds."
+            f"Rate limit exceeded. Retry after {retry_after} seconds. Resource type: {resource_type}"
         )
         await self._sleeps.sleep(retry_after)
         msg = "Rate limit exceeded."
@@ -817,7 +817,10 @@ class GitHubClient:
                     await self._put_to_sleep(resource_type="graphql")
             msg = f"Error while executing query. Exception: {exception.response.get('errors')}"
             raise Exception(msg) from exception
-        except Exception:
+        except Exception as e:
+            self._logger.debug(
+                f"An unexpected error occurred while executing GraphQL query: {query}. Error: {e}"
+            )
             raise
 
     @retryable(
@@ -862,7 +865,10 @@ class GitHubClient:
                 raise
         except RateLimitExceeded:
             await self._put_to_sleep("core")
-        except Exception:
+        except Exception as e:
+            self._logger.debug(
+                f"An unexpected error occurred while getting GitHub item: {resource}. Error: {e}"
+            )
             raise
 
     async def paginated_api_call(self, query, variables, keys):
