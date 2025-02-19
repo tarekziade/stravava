@@ -47,7 +47,20 @@ class S3Client:
             read_timeout=self.configuration["read_timeout"],
             connect_timeout=self.configuration["connect_timeout"],
             retries={"max_attempts": self.configuration["max_attempts"]},
+            s3={
+                "addressing_style": self.configuration["s3_addressing_style"],
+            },
+            use_fips_endpoint=self.configuration["aws_use_fips_endpoint"],
+            use_dualstack_endpoint=self.configuration["aws_use_dualstack_endpoint"],
         )
+
+        if self.configuration["s3_endpoint_url"]:
+            self.s3_endpoint_url = self.configuration["s3_endpoint_url"]
+        elif AWS_ENDPOINT is not None:
+            self.s3_endpoint_url = AWS_ENDPOINT
+        else:
+            self.s3_endpoint_url = None
+
         self.clients = {}
         self.client_context = []
 
@@ -64,8 +77,8 @@ class S3Client:
         if region_name in self.clients:
             return self.clients[region_name]
 
-        if AWS_ENDPOINT is not None:
-            self._logger.debug(f"Creating a session against {AWS_ENDPOINT}")
+        if self.s3_endpoint_url is not None:
+            self._logger.debug(f"Creating a session against {self.s3_endpoint_url}")
 
         # AsyncExitStack, supports asynchronous context managers, used to create client using enter_async_context and
         # these context manager will be stored in client_context list also client will be stored in clients dict with their region
@@ -74,7 +87,7 @@ class S3Client:
             self.session.client(
                 service_name="s3",
                 config=self.config,
-                endpoint_url=AWS_ENDPOINT,
+                endpoint_url=self.s3_endpoint_url,
                 region_name=region,
             )
         )
@@ -364,6 +377,47 @@ class S3DataSource(BaseDataSource):
                 "order": 3,
                 "sensitive": True,
                 "type": "str",
+            },
+            "s3_addressing_style": {
+                "default_value": "auto",
+                "display": "dropdown",
+                "label": "S3 Bucket Addressing Style",
+                "options": [
+                    {"label": "Auto", "value": "auto"},
+                    {"label": "Virtual", "value": "virtual"},
+                    {"label": "Path", "value": "path"},
+                ],
+                "order": 4,
+                "type": "str",
+                "value": "auto",
+                "tooltip": 'AWS users are recommended to use "Auto", S3-compatible users should refer to their provider.',
+                "ui_restrictions": ["advanced"],
+            },
+            "s3_endpoint_url": {
+                "label": "S3 Endpoint URL",
+                "order": 5,
+                "required": False,
+                "type": "str",
+                "tooltip": "AWS users are recommended to keep this blank, S3-compatible users should enter a complete URL from their provider.",
+                "ui_restrictions": ["advanced"],
+            },
+            "aws_use_fips_endpoint": {
+                "display": "toggle",
+                "label": "Use FIPS 140-3 Endpoints",
+                "order": 6,
+                "tooltip": "Not available in all regions.",
+                "type": "bool",
+                "ui_restrictions": ["advanced"],
+                "value": False,
+            },
+            "aws_use_dualstack_endpoint": {
+                "display": "toggle",
+                "label": "Use Dualstack Endpoints",
+                "order": 7,
+                "tooltip": "By default, only IPv4 is used. Enable to use dual IPv4/IPv6 endpoints.",
+                "type": "bool",
+                "ui_restrictions": ["advanced"],
+                "value": False,
             },
             "read_timeout": {
                 "default_value": DEFAULT_READ_TIMEOUT,
